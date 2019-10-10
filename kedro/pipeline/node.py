@@ -42,7 +42,7 @@ class Node:
     run user-provided functions as part of Kedro pipelines.
     """
 
-    # pylint: disable=W9016
+    # pylint: disable=missing-type-doc
     def __init__(
         self,
         func: Callable,
@@ -119,7 +119,7 @@ class Node:
         self._outputs = outputs
         self._name = name
         self._tags = set([] if tags is None else tags)
-        self._decorators = decorators or []
+        self._decorators = list(decorators or [])
 
         self._validate_unique_outputs()
         self._validate_inputs_dif_than_outputs()
@@ -166,6 +166,9 @@ class Node:
         return "Node({}, {!r}, {!r}, {!r})".format(
             self._func_name, self._inputs, self._outputs, self._name
         )
+
+    def __call__(self, **kwargs) -> Dict[str, Any]:
+        return self.run(inputs=kwargs)
 
     @property
     def _func_name(self):
@@ -230,7 +233,10 @@ class Node:
         Returns:
             Returns a short user-friendly name that is not guaranteed to be unique.
         """
-        return self._name or self._func_name
+        if self._name:
+            return self._name
+
+        return self._func_name.replace("_", " ").title()
 
     @property
     def inputs(self) -> List[str]:
@@ -330,14 +336,13 @@ class Node:
             >>> assert "output" in result
             >>> assert result['output'] == "f(g(fg(h(1))))"
         """
-        decorators = self._decorators + list(reversed(decorators))
         return Node(
             self._func,
             self._inputs,
             self._outputs,
             name=self._name,
             tags=self.tags,
-            decorators=decorators,
+            decorators=self._decorators + list(reversed(decorators)),
         )
 
     def run(self, inputs: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -381,13 +386,13 @@ class Node:
         try:
             inputs = dict() if inputs is None else inputs
             if not self._inputs:
-                outputs = self._run_no_inputs(inputs)
+                outputs = self._run_with_no_inputs(inputs)
             elif isinstance(self._inputs, str):
-                outputs = self._run_one_input(inputs)
+                outputs = self._run_with_one_input(inputs, self._inputs)
             elif isinstance(self._inputs, list):
-                outputs = self._run_with_list(inputs)
+                outputs = self._run_with_list(inputs, self._inputs)
             elif isinstance(self._inputs, dict):
-                outputs = self._run_with_dict(inputs)
+                outputs = self._run_with_dict(inputs, self._inputs)
 
             return self._outputs_to_dictionary(outputs)
 
@@ -396,7 +401,7 @@ class Node:
             self._logger.error("Node `%s` failed with error: \n%s", str(self), str(exc))
             raise exc
 
-    def _run_no_inputs(self, inputs: Dict[str, Any]):
+    def _run_with_no_inputs(self, inputs: Dict[str, Any]):
         if inputs:
             raise ValueError(
                 "Node {} expected no inputs, "
@@ -407,49 +412,49 @@ class Node:
 
         return self._decorated_func()
 
-    def _run_one_input(self, inputs: Dict[str, Any]):
-        if len(inputs) != 1 or self._inputs not in inputs:
+    def _run_with_one_input(self, inputs: Dict[str, Any], node_input: str):
+        if len(inputs) != 1 or node_input not in inputs:
             raise ValueError(
                 "Node {} expected one input named '{}', "
                 "but got the following {} input(s) instead: {}".format(
-                    str(self), self._inputs, len(inputs), list(sorted(inputs.keys()))
+                    str(self), node_input, len(inputs), list(sorted(inputs.keys()))
                 )
             )
 
-        return self._decorated_func(inputs[self._inputs])
+        return self._decorated_func(inputs[node_input])
 
-    def _run_with_list(self, inputs: Dict[str, Any]):
-        all_available = set(self._inputs).issubset(inputs.keys())
-        if len(self._inputs) != len(inputs) or not all_available:
+    def _run_with_list(self, inputs: Dict[str, Any], node_inputs: List[str]):
+        all_available = set(node_inputs).issubset(inputs.keys())
+        if len(node_inputs) != len(inputs) or not all_available:
             # This can be split in future into two cases, one successful
             raise ValueError(
                 "Node {} expected {} input(s) {}, "
                 "but got the following {} input(s) instead: {}.".format(
                     str(self),
-                    len(self._inputs),
-                    self._inputs,
+                    len(node_inputs),
+                    node_inputs,
                     len(inputs),
                     list(sorted(inputs.keys())),
                 )
             )
         # Ensure the function gets the inputs in the correct order
-        return self._decorated_func(*[inputs[item] for item in self._inputs])
+        return self._decorated_func(*[inputs[item] for item in node_inputs])
 
-    def _run_with_dict(self, inputs: Dict[str, Any]):
-        all_available = set(self._inputs.values()).issubset(inputs.keys())
-        if len(set(self._inputs.values())) != len(inputs) or not all_available:
+    def _run_with_dict(self, inputs: Dict[str, Any], node_inputs: Dict[str, str]):
+        all_available = set(node_inputs.values()).issubset(inputs.keys())
+        if len(set(node_inputs.values())) != len(inputs) or not all_available:
             # This can be split in future into two cases, one successful
             raise ValueError(
                 "Node {} expected {} input(s) {}, "
                 "but got the following {} input(s) instead: {}.".format(
                     str(self),
-                    len(set(self._inputs.values())),
-                    list(sorted(set(self._inputs.values()))),
+                    len(set(node_inputs.values())),
+                    list(sorted(set(node_inputs.values()))),
                     len(inputs),
                     list(sorted(inputs.keys())),
                 )
             )
-        kwargs = {arg: inputs[alias] for arg, alias in self._inputs.items()}
+        kwargs = {arg: inputs[alias] for arg, alias in node_inputs.items()}
         return self._decorated_func(**kwargs)
 
     def _outputs_to_dictionary(self, outputs):
@@ -465,7 +470,7 @@ class Node:
             return {name: outputs[key] for key, name in self._outputs.items()}
 
         def _from_list():
-            if not isinstance(outputs, list):
+            if not isinstance(outputs, (list, tuple)):
                 raise ValueError(
                     "Failed to save outputs of node {}.\n"
                     "The node definition contains a list of "
@@ -505,9 +510,11 @@ class Node:
         if not inspect.isbuiltin(func):
             args, kwargs = self._process_inputs_for_bind(inputs)
             try:
-                inspect.signature(func).bind(*args, **kwargs)
+                inspect.signature(func, follow_wrapped=False).bind(*args, **kwargs)
             except Exception as exc:
-                func_args = inspect.signature(func).parameters.keys()
+                func_args = inspect.signature(
+                    func, follow_wrapped=False
+                ).parameters.keys()
                 raise TypeError(
                     "Inputs of function expected {}, but got {}".format(
                         str(list(func_args)), str(inputs)
@@ -552,8 +559,8 @@ class Node:
     def _process_inputs_for_bind(inputs: Union[None, str, List[str], Dict[str, str]]):
         # Safeguard that we do not mutate list inputs
         inputs = copy.copy(inputs)
-        args = []
-        kwargs = {}
+        args = []  # type: List[str]
+        kwargs = {}  # type: Dict[str, str]
         if isinstance(inputs, str):
             args = [inputs]
         elif isinstance(inputs, list):
@@ -570,7 +577,7 @@ def _node_error_message(msg) -> str:
     ).format(msg)
 
 
-def node(  # pylint: disable=W9016
+def node(  # pylint: disable=missing-type-doc
     func: Callable,
     inputs: Union[None, str, List[str], Dict[str, str]],
     outputs: Union[None, str, List[str], Dict[str, str]],
