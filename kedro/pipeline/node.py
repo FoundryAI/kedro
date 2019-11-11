@@ -42,7 +42,7 @@ class Node:
     run user-provided functions as part of Kedro pipelines.
     """
 
-    # pylint: disable=W9016
+    # pylint: disable=missing-type-doc
     def __init__(
         self,
         func: Callable,
@@ -50,7 +50,7 @@ class Node:
         outputs: Union[None, str, List[str], Dict[str, str]],
         *,
         name: str = None,
-        tags: Iterable[str] = None,
+        tags: Union[str, Iterable[str]] = None,
         decorators: Iterable[Callable] = None
     ):
         """Create a node in the pipeline by providing a function to be called
@@ -118,11 +118,26 @@ class Node:
         self._inputs = inputs
         self._outputs = outputs
         self._name = name
-        self._tags = set([] if tags is None else tags)
+        self._tags = set(_to_list(tags))
         self._decorators = list(decorators or [])
 
         self._validate_unique_outputs()
         self._validate_inputs_dif_than_outputs()
+
+    def _copy(self, **overwrite_params):
+        """
+        Helper function to copy the node, replacing some values.
+        """
+        params = {
+            "func": self._func,
+            "inputs": self._inputs,
+            "outputs": self._outputs,
+            "name": self._name,
+            "tags": self._tags,
+            "decorators": self._decorators,
+        }
+        params.update(overwrite_params)
+        return Node(**params)
 
     @property
     def _logger(self):
@@ -167,6 +182,9 @@ class Node:
             self._func_name, self._inputs, self._outputs, self._name
         )
 
+    def __call__(self, **kwargs) -> Dict[str, Any]:
+        return self.run(inputs=kwargs)
+
     @property
     def _func_name(self):
         if hasattr(self._func, "__name__"):
@@ -194,7 +212,7 @@ class Node:
         """
         return set(self._tags)
 
-    def tag(self, tags: Iterable[str]) -> "Node":
+    def tag(self, tags: Union[str, Iterable[str]]) -> "Node":
         """Create a new ``Node`` which is an exact copy of the current one,
             but with more tags added to it.
 
@@ -205,14 +223,7 @@ class Node:
             A copy of the current ``Node`` object with the tags added.
 
         """
-        return Node(
-            self._func,
-            self._inputs,
-            self._outputs,
-            name=self._name,
-            tags=set(self._tags) | set(tags),
-            decorators=self._decorators,
-        )
+        return self._copy(tags=self.tags | set(_to_list(tags)))
 
     @property
     def name(self) -> str:
@@ -237,14 +248,17 @@ class Node:
 
     @property
     def inputs(self) -> List[str]:
-        """Return node inputs as a list preserving the original order
-            if possible.
+        """Return node inputs as a list, in the order required to bind them properly to
+        the node's function. If the node's function contains ``kwargs``, then ``kwarg`` inputs
+        are sorted alphabetically (for python 3.5 deterministic behavior).
 
         Returns:
             Node input names as a list.
 
         """
-        return self._to_list(self._inputs)
+        if isinstance(self._inputs, dict):
+            return _dict_inputs_to_list(self._func, self._inputs)
+        return _to_list(self._inputs)
 
     @property
     def outputs(self) -> List[str]:
@@ -255,7 +269,7 @@ class Node:
             Node output names as a list.
 
         """
-        return self._to_list(self._outputs)
+        return _to_list(self._outputs)
 
     @property
     def _decorated_func(self):
@@ -333,14 +347,7 @@ class Node:
             >>> assert "output" in result
             >>> assert result['output'] == "f(g(fg(h(1))))"
         """
-        return Node(
-            self._func,
-            self._inputs,
-            self._outputs,
-            name=self._name,
-            tags=self.tags,
-            decorators=self._decorators + list(reversed(decorators)),
-        )
+        return self._copy(decorators=self._decorators + list(reversed(decorators)))
 
     def run(self, inputs: Dict[str, Any] = None) -> Dict[str, Any]:
         """Run this node using the provided inputs and return its results
@@ -467,7 +474,7 @@ class Node:
             return {name: outputs[key] for key, name in self._outputs.items()}
 
         def _from_list():
-            if not isinstance(outputs, list):
+            if not isinstance(outputs, (list, tuple)):
                 raise ValueError(
                     "Failed to save outputs of node {}.\n"
                     "The node definition contains a list of "
@@ -507,9 +514,11 @@ class Node:
         if not inspect.isbuiltin(func):
             args, kwargs = self._process_inputs_for_bind(inputs)
             try:
-                inspect.signature(func).bind(*args, **kwargs)
+                inspect.signature(func, follow_wrapped=False).bind(*args, **kwargs)
             except Exception as exc:
-                func_args = inspect.signature(func).parameters.keys()
+                func_args = inspect.signature(
+                    func, follow_wrapped=False
+                ).parameters.keys()
                 raise TypeError(
                     "Inputs of function expected {}, but got {}".format(
                         str(list(func_args)), str(inputs)
@@ -534,21 +543,6 @@ class Node:
                 "A node cannot have the same inputs and outputs: "
                 "{}".format(str(self), common_in_out)
             )
-
-    @staticmethod
-    def _to_list(element: Union[None, str, List[str], Dict[str, str]]) -> List:
-        """Make a list out of node inputs/outputs.
-
-        Returns:
-            List[str]: Node input/output names as a list to standardise.
-        """
-        if element is None:
-            return list()
-        if isinstance(element, str):
-            return [element]
-        if isinstance(element, dict):
-            return sorted(element.values())
-        return element
 
     @staticmethod
     def _process_inputs_for_bind(inputs: Union[None, str, List[str], Dict[str, str]]):
@@ -630,3 +624,28 @@ def node(  # pylint: disable=missing-type-doc
         >>> ]
     """
     return Node(func, inputs, outputs, name=name, tags=tags)
+
+
+def _dict_inputs_to_list(func: Callable[[Any], Any], inputs: Dict[str, str]):
+    """Convert a dict representation of the node inputs to a list , ensuring
+    the appropriate order for binding them to the node's function.
+    """
+    sig = inspect.signature(func).bind(**inputs)
+    # for deterministic behavior in python 3.5, sort kwargs inputs alphabetically
+    return list(sig.args) + sorted(sig.kwargs.values())
+
+
+def _to_list(element: Union[None, str, Iterable[str], Dict[str, str]]) -> List:
+    """Make a list out of node inputs/outputs.
+
+    Returns:
+        List[str]: Node input/output names as a list to standardise.
+    """
+
+    if element is None:
+        return []
+    if isinstance(element, str):
+        return [element]
+    if isinstance(element, dict):
+        return sorted(element.values())
+    return list(element)

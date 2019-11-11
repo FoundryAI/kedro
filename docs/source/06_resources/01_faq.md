@@ -1,10 +1,13 @@
 # Frequently asked questions
 
-> *Note:* This documentation is based on `Kedro 0.15.0`, if you spot anything that is incorrect then please create an [issue](https://github.com/quantumblacklabs/kedro/issues) or pull request.
+> *Note:* This documentation is based on `Kedro 0.15.4`, if you spot anything that is incorrect then please create an [issue](https://github.com/quantumblacklabs/kedro/issues) or pull request.
 
 ## What is Kedro?
 
 [Kedro](https://github.com/quantumblacklabs/kedro) is a workflow development tool that helps you build data pipelines that are robust, scaleable, deployable, reproducible and versioned. It was originally designed by [Aris Valtazanos](https://github.com/arisvqb) and [Nikolaos Tsaousis](https://github.com/tsanikgr) at [QuantumBlack](https://github.com/quantumblacklabs/) to solve the challenges they faced in their project work.
+
+This work was later turned into a product thanks to the following contributors:
+[Ivan Danov](https://github.com/idanov), [Dmitrii Deriabin](https://github.com/DmitryDeryabin), [Gordon Wrigley](https://github.com/tolomea), [Yetunde Dada](https://github.com/yetudada), [Nasef Khan](https://github.com/nakhan98), [Kiyohito Kunii](https://github.com/921kiyo), [Nikolaos Kaltsas](https://github.com/nikos-kal), [Meisam Emamjome](https://github.com/misamae), [Peteris Erins](https://github.com/Pet3ris), [Lorena Balan](https://github.com/lorenabalan), [Richard Westenra](https://github.com/richardwestenra) and [Anton Kirilenko](https://github.com/Flid).
 
 ## What are the primary advantages of Kedro?
 
@@ -88,7 +91,7 @@ Kedro is built for Python 3.5+.
 * Avoid committing data to notebook output cells (data can easily sneak into notebooks when you don't delete output cells)
 * Don't commit sensitive results or plots to version control (in notebooks or otherwise)
 * Don't commit credentials in `conf/`. There are two default folders for adding configuration - `conf/base/` and `conf/local/`. Only the `conf/local/` folder should be used for sensitive information like access credentials. To add credentials, please refer to the `conf/base/credentials.yml` file in the project template.
-* By default any file inside the `conf/` folder (and its subfolders) containing `credentials` in its name will be ignored via `.gitignore` and not commited to your git repository.
+* By default any file inside the `conf/` folder (and its subfolders) containing `credentials` in its name will be ignored via `.gitignore` and not committed to your git repository.
 * To describe where your colleagues can access the credentials, you may edit the `README.md` to provide instructions.
 
 ## What is the philosophy behind Kedro?

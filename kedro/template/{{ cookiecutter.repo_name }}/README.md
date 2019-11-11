@@ -14,14 +14,14 @@ Take a look at the [documentation](https://kedro.readthedocs.io) to get started.
 
 In order to get the best out of the template:
  * Please don't remove any lines from the `.gitignore` file provided
- * Make sure your results can be reproduced by adding necessary data to `data/01_raw` only
+ * Make sure your results can be reproduced by following a data engineering convention, e.g. the one we suggest [here](https://kedro.readthedocs.io/en/latest/06_resources/01_faq.html#what-is-data-engineering-convention)
  * Don't commit any data to your repository
  * Don't commit any credentials or local configuration to your repository
  * Keep all credentials or local configuration in `conf/local/`
 
 ## Installing dependencies
 
-Dependencies should be declared in `src/requirements.txt`.
+Dependencies should be declared in `src/requirements.txt` for pip installation and `src/environment.yml` for conda installation.
 
 To install them, run:
 
@@ -123,3 +123,15 @@ kedro build-docs
 ```
 
 See your documentation by opening `docs/build/html/index.html`.
+
+## Building the project requirements
+
+To generate or update the dependency requirements for your project, run:
+
+```
+kedro build-reqs
+```
+
+This will copy the contents of `src/requirements.txt` into a new file `src/requirements.in` which will be used as the source for `pip-compile`. You can see the output of the resolution by opening `src/requirements.txt`.
+
+After this, if you'd like to update your project requirements, please update `src/requirements.in` and re-run `kedro build-reqs`.

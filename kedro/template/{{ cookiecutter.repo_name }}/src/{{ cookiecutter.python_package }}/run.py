@@ -29,13 +29,13 @@
 """Application entry point."""
 
 from pathlib import Path
-from typing import Iterable, Type
+from typing import Iterable, Type, Dict
 
-from kedro.context import KedroContext
+from kedro.context import KedroContext, load_context
 from kedro.runner import AbstractRunner
 from kedro.pipeline import Pipeline
 
-from {{ cookiecutter.python_package }}.pipeline import create_pipeline
+from {{ cookiecutter.python_package }}.pipeline import create_pipelines
 
 
 class ProjectContext(KedroContext):
@@ -47,32 +47,8 @@ class ProjectContext(KedroContext):
     project_name = "{{ cookiecutter.project_name }}"
     project_version = "{{ cookiecutter.kedro_version }}"
 
-    @property
-    def pipeline(self) -> Pipeline:
-        return create_pipeline()
-
-
-def __kedro_context__(env: str = None, **kwargs) -> KedroContext:
-    """Provide this project's context to ``kedro`` CLI and plugins.
-    Please do not rename or remove, as this will break the CLI tool.
-
-    Plugins may request additional objects from this method.
-
-    Args:
-        env: An optional parameter specifying the environment in which
-        the ``Pipeline`` should be run. If not specified defaults to "local".
-        kwargs: Optional custom arguments defined by users.
-    Returns:
-        Instance of ProjectContext class defined in Kedro project.
-
-    """
-    if env is None:
-        # Default configuration environment to be used for running the pipeline.
-        # Change this constant value if you want to load configuration
-        # from a different location.
-        env = "local"
-
-    return ProjectContext(Path.cwd(), env)
+    def _get_pipelines(self) -> Dict[str, Pipeline]:
+        return create_pipelines()
 
 
 def main(
@@ -82,6 +58,7 @@ def main(
     node_names: Iterable[str] = None,
     from_nodes: Iterable[str] = None,
     to_nodes: Iterable[str] = None,
+    from_inputs: Iterable[str] = None,
 ):
     """Application main entry point.
 
@@ -90,7 +67,7 @@ def main(
             filter the nodes of the ``Pipeline``. If specified, only the nodes
             containing *any* of these tags will be run.
         env: An optional parameter specifying the environment in which
-            the ``Pipeline`` should be run. If not specified defaults to "local".
+            the ``Pipeline`` should be run.
         runner: An optional parameter specifying the runner that you want to run
             the pipeline with.
         node_names: An optional list of node names which should be used to filter
@@ -100,11 +77,19 @@ def main(
             starting point of the new ``Pipeline``.
         to_nodes: An optional list of node names which should be used as an
             end point of the new ``Pipeline``.
+        from_inputs: An optional list of input datasets which should be used as a
+            starting point of the new ``Pipeline``.
 
     """
-
-    context = __kedro_context__(env)
-    context.run(tags, runner, node_names, from_nodes, to_nodes)
+    project_context = load_context(Path.cwd(), env=env)
+    project_context.run(
+        tags=tags,
+        runner=runner,
+        node_names=node_names,
+        from_nodes=from_nodes,
+        to_nodes=to_nodes,
+        from_inputs=from_inputs,
+    )
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ from s3fs import S3FileSystem
 
 from kedro.contrib.io.parquet import ParquetS3DataSet
 from kedro.io import DataSetError, Version
-from kedro.io.core import generate_current_version
+from kedro.io.core import generate_timestamp
 
 FILENAME = "test.parquet"
 BUCKET_NAME = "test_bucket"
@@ -56,7 +56,7 @@ def load_version(request):
 
 @pytest.fixture(params=[None])
 def save_version(request):
-    return request.param or generate_current_version()
+    return request.param or generate_timestamp()
 
 
 @pytest.fixture(params=[None])
@@ -264,10 +264,8 @@ class TestParquetS3DataSetVersioned:
         """Check the warning when saving to the path that differs from
         the subsequent load path."""
         pattern = (
-            r"Save path `{b}/{f}/{sv}/{f}` did not match load path "
-            r"`{b}/{f}/{lv}/{f}` for ParquetS3DataSet\(.+\)".format(
-                b=BUCKET_NAME, f=FILENAME, sv=save_version, lv=load_version
-            )
+            r"Save version `{0}` did not match load version `{1}` "
+            r"for ParquetS3DataSet\(.+\)".format(save_version, load_version)
         )
         with pytest.warns(UserWarning, match=pattern):
             versioned_s3_data_set.save(dummy_dataframe)

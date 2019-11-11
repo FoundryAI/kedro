@@ -28,7 +28,7 @@
 """``ParallelRunner`` is an ``AbstractRunner`` implementation. It can
 be used to run the ``Pipeline`` in parallel groups formed by toposort.
 """
-
+import os
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from itertools import chain
@@ -48,8 +48,6 @@ class ParallelRunnerManager(SyncManager):
     objects as default data sets in a pipeline.
     """
 
-    pass
-
 
 ParallelRunnerManager.register(  # pylint: disable=no-member
     "MemoryDataSet", MemoryDataSet
@@ -61,11 +59,30 @@ class ParallelRunner(AbstractRunner):
     be used to run the ``Pipeline`` in parallel groups formed by toposort.
     """
 
-    def __init__(self):
-        """Instantiates the runner by creating a Manager.
+    def __init__(self, max_workers: int = None):
+        """
+        Instantiates the runner by creating a Manager.
+
+        Args:
+            max_workers: Number of worker processes to spawn. If not set,
+                calculated automatically based on the pipeline configuration
+                and CPU core count.
+
+        Raises:
+            ValueError: bad parameters passed
         """
         self._manager = ParallelRunnerManager()
         self._manager.start()
+
+        if max_workers is not None and max_workers <= 0:
+            raise ValueError("max_workers should be positive")
+
+        # NOTE: `os.cpu_count` might return None in some weird cases.
+        # https://github.com/python/cpython/blob/3.7/Modules/posixmodule.c#L11431
+        self._max_workers = max_workers or os.cpu_count() or 1
+
+    def __del__(self):
+        self._manager.shutdown()
 
     def create_default_data_set(self, ds_name: str) -> AbstractDataSet:
         """Factory method for creating the default data set for the runner.
@@ -79,7 +96,7 @@ class ParallelRunner(AbstractRunner):
 
         """
         # pylint: disable=no-member
-        return self._manager.MemoryDataSet()
+        return self._manager.MemoryDataSet()  # type: ignore
 
     @classmethod
     def _validate_nodes(cls, nodes: Iterable[Node]):
@@ -98,7 +115,7 @@ class ParallelRunner(AbstractRunner):
                 "serializable, i.e. nodes should not include lambda "
                 "functions, nested functions, closures, etc.\nIf you "
                 "are using custom decorators ensure they are correctly using "
-                "functools.wraps().".format(unserializable)
+                "functools.wraps().".format(sorted(unserializable))
             )
 
     @classmethod
@@ -124,7 +141,7 @@ class ParallelRunner(AbstractRunner):
                 "sets are serializable, i.e. data sets should not make use of "
                 "lambda functions, nested functions, closures etc.\nIf you "
                 "are using custom decorators ensure they are correctly using "
-                "functools.wraps().".format(unserializable)
+                "functools.wraps().".format(sorted(unserializable))
             )
 
         memory_data_sets = []
@@ -140,10 +157,24 @@ class ParallelRunner(AbstractRunner):
             raise AttributeError(
                 "The following data sets are memory data sets: {}\n"
                 "ParallelRunner does not support output to externally created "
-                "MemoryDataSets".format(memory_data_sets)
+                "MemoryDataSets".format(sorted(memory_data_sets))
             )
 
-    def _run(  # pylint: disable=too-many-locals
+    def _get_required_workers_count(self, pipeline: Pipeline):
+        """
+        Calculate the max number of processes required for the pipeline,
+        limit to the number of CPU cores.
+        """
+        # Number of nodes is a safe upper-bound estimate.
+        # It's also safe to reduce it by the number of layers minus one,
+        # because each layer means some nodes depend on other nodes
+        # and they can not run in parallel.
+        # It might be not a perfect solution, but good enough and simple.
+        required_processes = len(pipeline.nodes) - len(pipeline.grouped_nodes) + 1
+
+        return min(required_processes, self._max_workers)
+
+    def _run(  # pylint: disable=too-many-locals,useless-suppression
         self, pipeline: Pipeline, catalog: DataCatalog
     ) -> None:
         """The abstract interface for running pipelines.
@@ -155,6 +186,7 @@ class ParallelRunner(AbstractRunner):
         Raises:
             AttributeError: when the provided pipeline is not suitable for
                 parallel execution.
+            Exception: in case of any downstream node failure.
 
         """
         nodes = pipeline.nodes
@@ -167,7 +199,9 @@ class ParallelRunner(AbstractRunner):
         done_nodes = set()  # type: Set[Node]
         futures = set()
         done = None
-        with ProcessPoolExecutor() as pool:
+        max_workers = self._get_required_workers_count(pipeline)
+
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
             while True:
                 ready = {n for n in todo_nodes if node_dependencies[n] <= done_nodes}
                 todo_nodes -= ready
@@ -178,7 +212,11 @@ class ParallelRunner(AbstractRunner):
                     break
                 done, futures = wait(futures, return_when=FIRST_COMPLETED)
                 for future in done:
-                    node = future.result()
+                    try:
+                        node = future.result()
+                    except Exception:
+                        self._suggest_resume_scenario(pipeline, done_nodes)
+                        raise
                     done_nodes.add(node)
 
                     # decrement load counts and release any data sets we've finished with
