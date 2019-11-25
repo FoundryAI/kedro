@@ -192,13 +192,13 @@ class Node:
 
         name = repr(self._func)
         if "functools.partial" in name:
-            warn(
-                "The node producing outputs `{}` is made from a `partial` function. "
-                "Partial functions do not have a `__name__` attribute: consider using "
-                "`functools.update_wrapper` for better log messages.".format(
-                    self.outputs
-                )
-            )
+            # warn(
+            #     "The node producing outputs `{}` is made from a `partial` function. "
+            #     "Partial functions do not have a `__name__` attribute: consider using "
+            #     "`functools.update_wrapper` for better log messages.".format(
+            #         self.outputs
+            #     )
+            # )
             name = "<partial>"
         return name
 
